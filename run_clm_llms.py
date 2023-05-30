@@ -32,7 +32,6 @@ from typing import Optional
 import datasets
 import evaluate
 import torch
-from datasets import load_dataset
 
 import transformers
 from transformers import (
@@ -98,9 +97,9 @@ from peft import (
     set_peft_model_state_dict,
 )
 
-from modeling import MM_LLMs, MM_LLMs_Config
-import clip
-import whisper
+# from modeling import MM_LLMs, MM_LLMs_Config
+from modeling_simplified import MM_LLMs, MM_LLMs_Config
+
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -281,6 +280,7 @@ class DataTrainingArguments:
                 extension = self.validation_file.split(".")[-1]
                 assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
 
+
 def draw_samples(lis, ratio):
     samples = ratio if ratio > 1 else int(ratio * len(lis))
 
@@ -293,6 +293,7 @@ def draw_samples(lis, ratio):
 
     return n_lis
 
+
 def load_datasets():
     from datasets.dataset_dict import DatasetDict
     from datasets import Dataset
@@ -300,7 +301,8 @@ def load_datasets():
     data_dirs = ["data/train_total_new_vname.cache"]
     video_names = ["data/avsd/train_video_names.json", "data/vqa/vqa_video_names.json"]
     all_train_dataset = pickle.load(
-        open(data_dirs[0], 'rb'))
+        open(data_dirs[0], 'rb')
+    )
     print(type(all_train_dataset))
     for k in all_train_dataset:
         print(k, all_train_dataset[k][0])
@@ -309,8 +311,10 @@ def load_datasets():
     # all_train_dataset['labels'] = labels
 
     pad_token_id = 32006
-    all_train_dataset['labels'] = [[(l if l != pad_token_id else IGNORE_INDEX) for l in label] 
-    for label in all_train_dataset['labels']]
+    all_train_dataset['labels'] = [
+        [(l if l != pad_token_id else IGNORE_INDEX) for l in label] 
+        for label in all_train_dataset['labels']
+     ]
 
     vname = json_load(video_names[0])['data']
     vname.extend(json_load(video_names[1])['data'])
@@ -320,14 +324,14 @@ def load_datasets():
     all_train_dataset['audios'] = [[e] for e in all_train_dataset['audios']]
     all_train_dataset['videos'] = [[e] for e in all_train_dataset['videos']]
 
-
     # all_train_dataset = TensorDataset(all_train_dataset['images'], all_train_dataset['audios'], 
     # all_train_dataset['videos'], all_train_dataset['input_ids'], all_train_dataset['labels'])
 
     eval_offset = 200
-    train_dataset = {'train': Dataset.from_dict({k: all_train_dataset[k] for k in all_train_dataset}),
-    'eval': Dataset.from_dict({k: all_train_dataset[k][:eval_offset] + all_train_dataset[k][60000:60000+eval_offset] + 
-    all_train_dataset[k][120000:120000+eval_offset] for k in all_train_dataset})}
+    train_dataset = {
+        'train': Dataset.from_dict({k: all_train_dataset[k] for k in all_train_dataset}),
+        'eval': Dataset.from_dict({k: all_train_dataset[k][:eval_offset] + all_train_dataset[k][60000:60000+eval_offset] + all_train_dataset[k][120000:120000+eval_offset] for k in all_train_dataset})
+    }
 
     train_dataset = DatasetDict(train_dataset)
     all_train_dataset = (train_dataset['train'], visual_data_names, train_dataset['eval'])
@@ -373,7 +377,7 @@ def main():
 
     # print(training_args)
 
-    training_args.remove_unused_columns=False
+    training_args.remove_unused_columns = False
     tokenizer = LlamaTokenizer.from_pretrained('trained_models/llama_tokenizer')
     # if tokenizer.pad_token is None:
     #     tokenizer.add_special_tokens(dict(pad_token=DEFAULT_PAD_TOKEN))
@@ -416,7 +420,6 @@ def main():
         + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
-
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
@@ -475,13 +478,16 @@ def main():
         for name, param in model.named_parameters():
             if param.requires_grad:
                 print(name)
+    
     def preprocess_logits_for_metrics(logits, labels):
         if isinstance(logits, tuple):
             # Depending on the model and config, logits may contain extra tensors,
             # like past_key_values, but logits always come first
             logits = logits[0]
         return logits.argmax(dim=-1)
+    
     metric = evaluate.load("accuracy")
+    
     def compute_metrics(eval_preds):
         preds, labels = eval_preds
         # preds have the same shape as the labels, after the argmax(-1) has been calculated
@@ -489,6 +495,7 @@ def main():
         labels = labels[:, 1:].reshape(-1)
         preds = preds[:, :-1].reshape(-1)
         return metric.compute(predictions=preds, references=labels)
+    
     train_dataset, visual_names, eval_dataset = load_datasets()
 
     if training_args.do_train:
@@ -510,9 +517,8 @@ def main():
         # Data collator will default to DataCollatorWithPadding, so we change it.
         data_collator=default_data_collator,
         compute_metrics=compute_metrics,
-        preprocess_logits_for_metrics=preprocess_logits_for_metrics if training_args.do_eval 
-        and not is_torch_tpu_available() else None,
-        )
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics if training_args.do_eval and not is_torch_tpu_available() else None,
+    )
 
     # Training
     if training_args.do_train:
@@ -544,16 +550,13 @@ def main():
         audio_dirs = ['None', 'data/avsd/audios/7UPGT', 'data/avsd/audios/3MSZA']
 
         prompt = "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{}\n\n### Response:"
-        instructions = [prompt.format('Give three tips for staying healthy.'), 
-        prompt.format('Does the woman eat or drink anything?'),
-        prompt.format('What\'s on the table next to her?')]
+        instructions = [
+            prompt.format('Give three tips for staying healthy.'), 
+            prompt.format('Does the woman eat or drink anything?'),
+            prompt.format('What\'s on the table next to her?')
+        ]
 
         inference_generation(model, tokenizer, image_dirs, audio_dirs, video_dirs, instructions)
-
-
-def _mp_fn(index):
-    # For xla_spawn (TPUs)
-    main()
 
 
 if __name__ == "__main__":
