@@ -162,7 +162,7 @@ image_dir = 'data/avsd/frames/'
 audio_dir = 'data/avsd/audios/'
 
 
-visual_name_dir = "data/all_visual_names.json"
+visual_name_dir = "data/all_visual_names_instruction.json"
 vname = json_load(visual_name_dir)['list']
 train_video_names = {'data': vname}
 
@@ -276,22 +276,6 @@ class LLMTrainer(Trainer):
                 else:
                     loss = None
                     with self.compute_loss_context_manager():
-                        from transformers import LlamaTokenizer
-                        tokenizer = LlamaTokenizer.from_pretrained('trained_models/llama_tokenizer')
-
-                        image_dirs = ['None', 'None', 'None']
-                        video_dirs = ['None', 'data/avsd/frames/7UPGT', 'data/avsd/frames/3MSZA']
-                        audio_dirs = ['None', 'data/avsd/audios/7UPGT', 'data/avsd/audios/3MSZA']
-
-                        prompt = "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{}\n\n### Response:"
-                        instructions = [prompt.format('Give three tips for staying healthy.'), 
-                        prompt.format('Does the woman eat or drink anything?'),
-                        prompt.format('What\'s on the table next to her?')]
-
-                        inference_generation(model, tokenizer, image_dirs, audio_dirs, video_dirs, instructions)
-                        
-                        exit()
-
                         inputs = self.get_self_inputs(inputs)
                         # forward pass
                         outputs = model(**inputs)
@@ -369,11 +353,11 @@ class LLMTrainer(Trainer):
                 all_images.append(torch.zeros(1, 3, 224, 224))
                 continue
             _image_dir = train_video_names['data'][vid]
-            if len(_image_dir.split('_')[-1].split('.')[0]) < 12:
-                i_str = _image_dir.split('_')[-1].split('.')[0]
-                n_str = '0' * (12 - len(i_str)) + i_str
-                _image_dir = _image_dir.replace(i_str, n_str)
-            frame = preprocess(Image.open(_image_dir))
+            # if len(_image_dir.split('_')[-1].split('.')[0]) < 12:
+            #     i_str = _image_dir.split('_')[-1].split('.')[0]
+            #     n_str = '0' * (12 - len(i_str)) + i_str
+            #     _image_dir = _image_dir.replace(i_str, n_str)
+            frame = preprocess(Image.open('data/coco/train2014/{}'.format(_image_dir)))
             all_images.append(frame.unsqueeze(0))
         
         all_images = torch.cat(all_images, dim=0)
@@ -386,135 +370,16 @@ class LLMTrainer(Trainer):
                     'input_ids': batch['input_ids'],
                     'attention_mask': batch['attention_mask'],
                     'labels': batch['labels'] if 'labels' in batch else None,
-                    'image_starts': torch.tensor([special_tokens['<image>']] * bs, dtype=torch.long),
-                    'image_ends': torch.tensor([special_tokens['</image>']] * bs, dtype=torch.long),
-                    'audio_starts': torch.tensor([special_tokens['<audio>']] * bs, dtype=torch.long),
-                    'audio_ends': torch.tensor([special_tokens['</audio>']] * bs, dtype=torch.long),
-                    'video_starts': torch.tensor([special_tokens['<video>']] * bs, dtype=torch.long),
-                    'video_ends': torch.tensor([special_tokens['</video>']] * bs, dtype=torch.long),
+                    'image_starts': torch.tensor([self.tokenizer.convert_tokens_to_ids('<image>')] * bs, dtype=torch.int),
+                    'image_ends': torch.tensor([self.tokenizer.convert_tokens_to_ids('</image>')] * bs, dtype=torch.int),
+                    'audio_starts': torch.tensor([self.tokenizer.convert_tokens_to_ids('<audio>')] * bs, dtype=torch.int),
+                    'audio_ends': torch.tensor([self.tokenizer.convert_tokens_to_ids('</audio>')] * bs, dtype=torch.int),
+                    'video_starts': torch.tensor([self.tokenizer.convert_tokens_to_ids('<video>')] * bs, dtype=torch.int),
+                    'video_ends': torch.tensor([self.tokenizer.convert_tokens_to_ids('</video>')] * bs, dtype=torch.int),
                     }
         inputs = {k: inputs[k].to(device) if inputs[k] is not None else inputs[k] for k in inputs}
 
         return {'inputs': inputs}
-
-    def _save(self, output_dir: Optional[str] = None, state_dict=None):
-        # If we are executing this function, we are the process zero, so we don't check for that.
-        output_dir = output_dir if output_dir is not None else self.args.output_dir
-        os.makedirs(output_dir, exist_ok=True)
-        # logger.info(f"Saving model checkpoint to {output_dir}")
-        # Save a trained model and configuration using `save_pretrained()`.
-        # They can then be reloaded using `from_pretrained()`
-        if not isinstance(self.model, PreTrainedModel):
-            if state_dict is None:
-                state_dict = self.model.state_dict()
-
-            if isinstance(unwrap_model(self.model), PreTrainedModel):
-                unwrap_model(self.model).save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
-                )
-            else:
-                # logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
-                if self.args.save_safetensors:
-                    safetensors.torch.save_file(state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME))
-                else:
-                    torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
-        else:
-            self.model.save_pretrained(
-                output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
-            )
-            # self.model.llm.save_pretrained(os.path.join(output_dir, 'llm_lora'))
-
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
-
-        # Good practice: save your training arguments together with the trained model
-        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
-
-    def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
-        """
-        Will save the model, so you can reload it using `from_pretrained()`.
-
-        Will only save from the main process.
-        """
-
-        if output_dir is None:
-            output_dir = self.args.output_dir
-
-        if is_torch_tpu_available():
-            self._save_tpu(output_dir)
-        elif is_sagemaker_mp_enabled():
-            print('================================================1111111111111111111111')
-            # Calling the state_dict needs to be done on the wrapped model and on all processes.
-            os.makedirs(output_dir, exist_ok=True)
-            state_dict = self.model_wrapped.state_dict()
-            if self.args.should_save:
-                print('================================================111111111111111111111122222222222222222222')
-                # exit()
-
-                self._save(output_dir, state_dict=state_dict)
-            if IS_SAGEMAKER_MP_POST_1_10:
-                print('================================================111111111111111111111133333333333333333333')
-                # 'user_content.pt' indicates model state_dict saved with smp >= 1.10
-                Path(os.path.join(output_dir, "user_content.pt")).touch()
-        elif (
-            ShardedDDPOption.ZERO_DP_2 in self.args.sharded_ddp
-            or ShardedDDPOption.ZERO_DP_3 in self.args.sharded_ddp
-            or self.fsdp is not None
-        ):
-            print('================================================222222222222222222222222222222222222222222')
-            # exit()
-            state_dict = self.model.state_dict()
-
-            if self.args.should_save:
-                print('================================================222222222222222222222222222222222222222111111111111111111')
-                # exit()
-                self._save(output_dir, state_dict=state_dict)
-        elif self.deepspeed:
-            print('================================================333333333333333333333333333333333333333333333333')
-
-            # this takes care of everything as long as we aren't under zero3
-            if self.args.should_save:
-                print('================================================333333333333333333333333111111111111111111111')
-                # exit()
-                self._save(output_dir)
-
-            if is_deepspeed_zero3_enabled():
-                print('================================================333333333333333333333333333222222222222222222222')
-                # It's too complicated to try to override different places where the weights dump gets
-                # saved, so since under zero3 the file is bogus, simply delete it. The user should
-                # either user deepspeed checkpoint to resume or to recover full weights use
-                # zero_to_fp32.py stored in the checkpoint.
-                if self.args.should_save:
-                    print('================================================33333333333333333333333333333333333333333444444444444444444444')
-
-                    file = os.path.join(output_dir, WEIGHTS_NAME)
-                    if os.path.isfile(file):
-                        # logger.info(f"deepspeed zero3: removing {file}, see zero_to_fp32.py to recover weights")
-                        os.remove(file)
-
-                # now save the real model if stage3_gather_16bit_weights_on_model_save=True
-                # if false it will not be saved.
-                # This must be called on all ranks
-                if not self.deepspeed.save_16bit_model(output_dir, WEIGHTS_NAME):
-                    print('================================================33333333333335555555555555555555555555')
-                    # logger.warning(
-                    #     "deepspeed.save_16bit_model didn't save the model, since"
-                    #     " stage3_gather_16bit_weights_on_model_save=false. Saving the full checkpoint instead, use"
-                    #     " zero_to_fp32.py to recover weights"
-                    # )
-                    # # exit()
-                    self.deepspeed.save_checkpoint(output_dir)
-
-        elif self.args.should_save:
-            print('================================================33333333333333333333366666666666666666666666666')
-            # exit()
-            self._save(output_dir)
-
-        # Push to the Hub when `save_model` is called by the user.
-        if self.args.push_to_hub and not _internal_call:
-            print('================================================5555555555555555555555555555555555555555555555')
-            # exit()
-            self.push_to_hub(commit_message="Model save")
 
     def get_model(self):
         """
@@ -557,7 +422,7 @@ def inference_generation(model, tokenizer, image_dirs, audio_dirs, video_dirs, i
         for image_dir, video_dir, audio_dir, instruction in zip(image_dirs, video_dirs, audio_dirs, instructions):
             _all_video_frames = []
             for vfi in train_frame_ind:
-                if image_dir == 'None':
+                if video_dir == 'None':
                     _all_video_frames.append(torch.zeros(1, 3, 224, 224))
                     continue
                 frame = preprocess(
@@ -590,7 +455,7 @@ def inference_generation(model, tokenizer, image_dirs, audio_dirs, video_dirs, i
             
             eos_token_id = tokenizer.eos_token_id
             if eos_token_id in input_ids:
-                encoded_text.remove(eos_token_id)
+                input_ids.remove(eos_token_id)
 
             input_ids = torch.tensor([input_ids], dtype=torch.int).to(device)
 
@@ -606,12 +471,12 @@ def inference_generation(model, tokenizer, image_dirs, audio_dirs, video_dirs, i
                     'input_ids': input_ids,
                     # 'attention_mask': torch.tensor([1] * seq_len, dtype=torch.int).reshape(bs, -1).contiguous(),
                     # 'labels': None,
-                    'image_starts': torch.tensor([special_tokens['<image>']] * bs, dtype=torch.int),
-                    'image_ends': torch.tensor([special_tokens['</image>']] * bs, dtype=torch.int),
-                    'audio_starts': torch.tensor([special_tokens['<audio>']] * bs, dtype=torch.int),
-                    'audio_ends': torch.tensor([special_tokens['</audio>']] * bs, dtype=torch.int),
-                    'video_starts': torch.tensor([special_tokens['<video>']] * bs, dtype=torch.int),
-                    'video_ends': torch.tensor([special_tokens['</video>']] * bs, dtype=torch.int),
+                    'image_starts': torch.tensor([tokenizer.convert_tokens_to_ids('<image>')] * bs, dtype=torch.int),
+                    'image_ends': torch.tensor([tokenizer.convert_tokens_to_ids('</image>')] * bs, dtype=torch.int),
+                    'audio_starts': torch.tensor([tokenizer.convert_tokens_to_ids('<audio>')] * bs, dtype=torch.int),
+                    'audio_ends': torch.tensor([tokenizer.convert_tokens_to_ids('</audio>')] * bs, dtype=torch.int),
+                    'video_starts': torch.tensor([tokenizer.convert_tokens_to_ids('<video>')] * bs, dtype=torch.int),
+                    'video_ends': torch.tensor([tokenizer.convert_tokens_to_ids('</video>')] * bs, dtype=torch.int),
                     }
             inputs = {k: inputs[k].to(device) for k in inputs}
 
@@ -624,7 +489,7 @@ def inference_generation(model, tokenizer, image_dirs, audio_dirs, video_dirs, i
 
             print(input_text)
             print('========================================')
-            print(generated_text)
+            print(generated_text.lstrip())
 
 
 def batch_inference_generation(args, model, tokenizer, image_dirs, audio_dirs, video_dirs, instructions, responses, batch_size, dataset):
@@ -647,7 +512,7 @@ def batch_inference_generation(args, model, tokenizer, image_dirs, audio_dirs, v
             for image_dir, video_dir, audio_dir, instruction in zip(batch_image_dirs, batch_video_dirs, batch_audio_dirs, batch_instructions):
                 _all_video_frames = []
                 for vfi in train_frame_ind:
-                    if image_dir == 'None':
+                    if video_dir == 'None':
                         _all_video_frames.append(torch.zeros(1, 3, 224, 224))
                         continue
                     frame = preprocess(
@@ -695,12 +560,12 @@ def batch_inference_generation(args, model, tokenizer, image_dirs, audio_dirs, v
                       'audios': batch_all_audio_mels.half(),
                       'images': batch_all_images.half(),
                       'input_ids': batch_input_ids,
-                      'image_starts': torch.tensor([special_tokens['<image>']] * bs, dtype=torch.int),
-                      'image_ends': torch.tensor([special_tokens['</image>']] * bs, dtype=torch.int),
-                      'audio_starts': torch.tensor([special_tokens['<audio>']] * bs, dtype=torch.int),
-                      'audio_ends': torch.tensor([special_tokens['</audio>']] * bs, dtype=torch.int),
-                      'video_starts': torch.tensor([special_tokens['<video>']] * bs, dtype=torch.int),
-                      'video_ends': torch.tensor([special_tokens['</video>']] * bs, dtype=torch.int),
+                      'image_starts': torch.tensor([tokenizer.convert_tokens_to_ids('<image>')] * bs, dtype=torch.int),
+                      'image_ends': torch.tensor([tokenizer.convert_tokens_to_ids('</image>')] * bs, dtype=torch.int),
+                      'audio_starts': torch.tensor([tokenizer.convert_tokens_to_ids('<audio>')] * bs, dtype=torch.int),
+                      'audio_ends': torch.tensor([tokenizer.convert_tokens_to_ids('</audio>')] * bs, dtype=torch.int),
+                      'video_starts': torch.tensor([tokenizer.convert_tokens_to_ids('<video>')] * bs, dtype=torch.int),
+                      'video_ends': torch.tensor([tokenizer.convert_tokens_to_ids('</video>')] * bs, dtype=torch.int),
                       }
             inputs = {k: inputs[k].to(device) for k in inputs}
 
