@@ -270,16 +270,6 @@ class DataTrainingArguments:
         if self.streaming:
             require_version("datasets>=2.0.0", "The streaming feature requires `datasets>=2.0.0`")
 
-        if self.dataset_name is None and self.train_file is None and self.validation_file is None:
-            raise ValueError("Need either a dataset name or a training/validation file.")
-        else:
-            if self.train_file is not None:
-                extension = self.train_file.split(".")[-1]
-                assert extension in ["csv", "json", "txt"], "`train_file` should be a csv, a json or a txt file."
-            if self.validation_file is not None:
-                extension = self.validation_file.split(".")[-1]
-                assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
-
 
 def draw_samples(lis, ratio):
     samples = ratio if ratio > 1 else int(ratio * len(lis))
@@ -294,15 +284,13 @@ def draw_samples(lis, ratio):
     return n_lis
 
 
-def load_datasets():
+def load_datasets(data_args):
     from datasets.dataset_dict import DatasetDict
     from datasets import Dataset
 
-    data_dirs = ["data/train_total_new_vname.cache"]
+    data_dir = data_args.train_file
     video_names = ["data/avsd/train_video_names.json", "data/vqa/vqa_video_names.json"]
-    all_train_dataset = pickle.load(
-        open(data_dirs[0], 'rb')
-    )
+    all_train_dataset = pickle.load(open(data_dir, 'rb'))
     print(type(all_train_dataset))
     for k in all_train_dataset:
         print(k, all_train_dataset[k][0])
@@ -328,13 +316,9 @@ def load_datasets():
     # all_train_dataset['videos'], all_train_dataset['input_ids'], all_train_dataset['labels'])
 
     eval_offset = 200
-    train_dataset = {
-        'train': Dataset.from_dict({k: all_train_dataset[k] for k in all_train_dataset}),
-        'eval': Dataset.from_dict({k: all_train_dataset[k][:eval_offset] + all_train_dataset[k][60000:60000+eval_offset] + all_train_dataset[k][120000:120000+eval_offset] for k in all_train_dataset})
-    }
-
+    train_dataset = {'train': Dataset.from_dict({k: all_train_dataset[k] for k in all_train_dataset})}
     train_dataset = DatasetDict(train_dataset)
-    all_train_dataset = (train_dataset['train'], visual_data_names, train_dataset['eval'])
+    all_train_dataset = (train_dataset['train'], visual_data_names)
 
     return all_train_dataset
 
@@ -379,18 +363,24 @@ def main():
 
     training_args.remove_unused_columns = False
     tokenizer = LlamaTokenizer.from_pretrained('trained_models/llama_tokenizer')
-    # if tokenizer.pad_token is None:
-    #     tokenizer.add_special_tokens(dict(pad_token=DEFAULT_PAD_TOKEN))
-    # tokenizer.padding_side = "right"
 
-    # # xxx: 2023-03-21, add special tokens
-    # tokenizer.add_special_tokens(
-    #     {
-    #         "eos_token": DEFAULT_EOS_TOKEN,
-    #         "bos_token": DEFAULT_BOS_TOKEN,
-    #         "unk_token": DEFAULT_UNK_TOKEN,
-    #     }
-    # )
+    # Chenyang: 2023-05-21, add special tokens
+
+    special_tokens_dict = {'additional_special_tokens': ['<image>', '</image>', '<audio>', '</audio>', '<video>', '</video>', '[PAD]', '<s>', '</s>', '<unk>']}
+    # num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
+    # model.resize_token_embeddings(len(tokenizer))
+
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens(dict(pad_token=DEFAULT_PAD_TOKEN))
+    tokenizer.padding_side = "right"
+
+    tokenizer.add_special_tokens(
+        {
+            "eos_token": DEFAULT_EOS_TOKEN,
+            "bos_token": DEFAULT_BOS_TOKEN,
+            "unk_token": DEFAULT_UNK_TOKEN,
+        }
+    )
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -495,8 +485,8 @@ def main():
         labels = labels[:, 1:].reshape(-1)
         preds = preds[:, :-1].reshape(-1)
         return metric.compute(predictions=preds, references=labels)
-    
-    train_dataset, visual_names, eval_dataset = load_datasets()
+
+    train_dataset, visual_names = load_datasets(data_args)
 
     if training_args.do_train:
         if data_args.max_train_samples is not None:
@@ -512,7 +502,7 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=eval_dataset,
+        eval_dataset=None,
         tokenizer=tokenizer,
         # Data collator will default to DataCollatorWithPadding, so we change it.
         data_collator=default_data_collator,
