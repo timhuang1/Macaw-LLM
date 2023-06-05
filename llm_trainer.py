@@ -132,6 +132,7 @@ special_tokens = {
     '</video>': 32005,
 }
 
+
 def draw_samples(lis, ratio):
     samples = ratio if ratio > 1 else int(ratio * len(lis))
 
@@ -180,13 +181,13 @@ frame_ind[-1] = t_frames - 1
 
 train_frame_ind = frame_ind
 
+
 class LLMTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         inputs = self.get_self_inputs(inputs)
         # forward pass
         loss = model(**inputs)[0]
         return loss
-
 
     def prediction_step(
         self,
@@ -428,7 +429,6 @@ class LLMTrainer(Trainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
-
 
     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
         """
