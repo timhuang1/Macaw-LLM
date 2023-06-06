@@ -206,7 +206,7 @@ def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
                 continue
 
             prompt = "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{}\n\n### Response:\n {} \n\n"
-            q = prompt.format(e['instruction'], e['response']) + + tokenizer.eos_token
+            q = prompt.format(e['instruction'], e['response']) + tokenizer.eos_token
             t_all = tokenizer.encode(q, max_length=max_length, truncation=True)
 
             q_input = q.split(' Response:')[0] + ' Response:'
