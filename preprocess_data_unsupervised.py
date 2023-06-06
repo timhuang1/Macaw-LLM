@@ -1,18 +1,13 @@
-from tqdm import tqdm
+import os
 import pickle
 import json
 import codecs
-import requests
-import pandas as pd
-from transformers import BertTokenizer, AutoTokenizer, LlamaTokenizer
-from os import listdir
-from os.path import isfile, join
+import argparse
+from tqdm import tqdm
+from transformers import AutoTokenizer
 import torch
 import numpy as np
-import random
-import clip
 import torch
-from transformers import AutoFeatureExtractor, AutoModel, LlamaForCausalLM
 
 json_load = lambda x: json.load(codecs.open(x, 'r', encoding='utf-8'))
 json_dump = lambda d, p: json.dump(d, codecs.open(p, 'w', 'utf-8'), indent=2, ensure_ascii=False)
@@ -37,9 +32,58 @@ PROMPT_DICT = {
     ),
 }
 
+coco_examples_filename = "generated_examples_coco.json"
+avsd_examples_filename = "generated_examples_avsd.json"
+alpaca_examples_filename = "alpaca_data.json"
+visual_names_filename = "all_visual_names_instruction.json"
+saved_ds_filename = "train_total_new_instruction.cache.new"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Building and processing datasets for mllm")
+    parser.add_argument(
+        "--model_name_or_path",
+        type=str,
+        help="Path to pretrained model or model identifier from huggingface.co/models.",
+        required=True,
+    )
+    parser.add_argument(
+        "--data_dir", type=str, default=None, help="The raw data dir. Should contain sub-folders, including /avsd, /vqa, /alpaca_data."
+    )
+    parser.add_argument(
+        "--default_sample_number", type=int, default=50000, help="Default number of instances to sample for each subset"
+    )
+    parser.add_argument(
+        "--vqa_sample_number", type=int, default=None, help="Number of instances to sample for vqa dataset"
+    )
+    parser.add_argument(
+        "--alpaca_sample_number", type=int, default=None, help="Number of instances to sample for alpaca dataset"
+    )
+    parser.add_argument(
+        "--avsd_sample_number", type=int, default=None, help="Number of instances to sample for avsd dataset"
+    )
+    parser.add_argument(
+        "--max_length",
+        type=int,
+        default=256,
+        help=(
+            "Optional input sequence length after tokenization. The training dataset will be truncated in block of"
+            " this size for training. Default to the model max input length for single sentence inputs (take into"
+            " account special tokens)."
+        ),
+    )
+
+    args = parser.parse_args()
+    args.vqa_sample_number = args.vqa_sample_number or args.default_sample_number
+    args.alpaca_sample_number = args.alpaca_sample_number or args.default_sample_number
+    args.avsd_sample_number = args.avsd_sample_number or args.default_sample_number
+    return args
+
 
 def preprocess_coco_to_tensor_dataset(all_visual_names, tokenizer):
-    all_examples = json_load('data/generated_examples_coco_1.json')['data']
+    # all_examples = json_load('data/generated_examples_coco.json')['data']
+    all_examples = json_load(os.path.join(args.data_dir, coco_examples_filename))['data']
 
     max_length = 256
     all_images, all_null_audios, all_null_videos = [], [], []
@@ -83,19 +127,20 @@ def preprocess_coco_to_tensor_dataset(all_visual_names, tokenizer):
 
     all_null_audios = [-1] * len(all_images)
     all_null_videos = all_null_audios
-    tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
-    tokenized_texts['labels'] = all_native_labels
-    tokenized_texts['images'] = all_images
-    tokenized_texts['audios'] = all_null_audios
-    tokenized_texts['videos'] = all_null_videos
+    # tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
+    # tokenized_texts['labels'] = all_native_labels
+    # tokenized_texts['images'] = all_images
+    # tokenized_texts['audios'] = all_null_audios
+    # tokenized_texts['videos'] = all_null_videos
 
     return all_textual_inputs, all_native_labels, all_images, all_null_audios, all_null_videos
 
 
 def preprocess_alpaca_to_tensor_dataset(tokenizer):
-    all_examples = json_load('data/alpaca_data/alpaca_data.json')
+    # all_examples = json_load('data/alpaca_data/alpaca_data.json')
+    all_examples = json_load(os.path.join(args.data_dir, alpaca_examples_filename))
 
-    max_length = 256
+    max_length = args.max_length
     all_null_images, all_null_audios, all_null_videos = [], [], []
     all_texts, all_labels = [], []
 
@@ -105,7 +150,6 @@ def preprocess_alpaca_to_tensor_dataset(tokenizer):
         texts = PROMPT_DICT['prompt_input'].format(e['instruction'], e['input']) if e['input'] != "" else PROMPT_DICT['prompt_no_input'].format(e['instruction'])
         full_texts = texts + '\n {} \n\n'.format(e['output'])
         t_all = tokenizer.encode(full_texts)
-        
 
         t_texts = tokenizer.encode(texts)
         if len(t_texts) >= max_length:
@@ -131,11 +175,11 @@ def preprocess_alpaca_to_tensor_dataset(tokenizer):
     all_null_audios = all_null_images
     all_null_videos = all_null_images 
 
-    tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
-    tokenized_texts['labels'] = all_native_labels
-    tokenized_texts['images'] = all_null_images
-    tokenized_texts['audios'] = all_null_audios
-    tokenized_texts['videos'] = all_null_videos
+    # tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
+    # tokenized_texts['labels'] = all_native_labels
+    # tokenized_texts['images'] = all_null_images
+    # tokenized_texts['audios'] = all_null_audios
+    # tokenized_texts['videos'] = all_null_videos
 
     return all_textual_inputs, all_native_labels, all_null_images, all_null_audios, all_null_videos
 
@@ -154,12 +198,12 @@ def draw_samples(lis, ratio):
 
 
 def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
-    train_metadata_dir = 'data/generated_examples_avsd_1.json'
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # train_metadata_dir = 'data/generated_examples_avsd.json'
+    train_metadata_dir = os.path.join(args.data_dir, avsd_examples_filename)
 
     torch.random.manual_seed(0)
-    max_length = 256
+    max_length = args.max_length
+    
     def read_image_and_audio(metadata_dir):
         metadata = json_load(metadata_dir)['data']
 
@@ -198,11 +242,11 @@ def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
             all_texts.append(torch.tensor([t_all], dtype=torch.int))
             all_labels.append(torch.tensor([labels], dtype=torch.int))
 
-        tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
-        tokenized_texts['labels'] = all_native_labels
-        tokenized_texts['images'] = all_null_images
-        tokenized_texts['audios'] = all_audios
-        tokenized_texts['videos'] = all_videos
+        # tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
+        # tokenized_texts['labels'] = all_native_labels
+        # tokenized_texts['images'] = all_null_images
+        # tokenized_texts['audios'] = all_audios
+        # tokenized_texts['videos'] = all_videos
         
         return all_textual_inputs, all_native_labels, all_null_images, all_audios, all_videos
 
@@ -212,12 +256,11 @@ def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
 
 
 def preprocess_all_datasets():
-    all_visual_names = json_load('data/all_visual_names_instruction.json')['dict']
-    tokenizer = AutoTokenizer.from_pretrained('trained_models/llama_tokenizer')
+    all_visual_names = json_load(os.path.join(args.data_dir, visual_names_filename))['dict']
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
-    # Chenyang: 2023-05-21, add special tokens
-
-    special_tokens_dict = {'additional_special_tokens': ['<image>', '</image>', '<audio>', '</audio>', '<video>', '</video>']}
+    # # Chenyang: 2023-05-21, add special tokens
+    # special_tokens_dict = {'additional_special_tokens': ['<image>', '</image>', '<audio>', '</audio>', '<video>', '</video>']}
 
     if tokenizer.pad_token is None:
         tokenizer.add_special_tokens(dict(pad_token=DEFAULT_PAD_TOKEN))
@@ -230,11 +273,10 @@ def preprocess_all_datasets():
             "unk_token": DEFAULT_UNK_TOKEN,
         }
     )
-
-    tokenizer.save_pretrained('trained_models/llama_tokenizer')
+    # tokenizer.save_pretrained('trained_models/llama_tokenizer')
 
     all_image_data = preprocess_coco_to_tensor_dataset(all_visual_names, tokenizer)
-    all_tetx_data = preprocess_alpaca_to_tensor_dataset(tokenizer)
+    all_text_data = preprocess_alpaca_to_tensor_dataset(tokenizer)
     all_video_data = preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer)
 
     def draw_examples(lis, num):
@@ -242,15 +284,14 @@ def preprocess_all_datasets():
         return ri
 
     ra, rb, rc = None, None, None
-
     all_dataset = []
     i = 0
-    for a,b,c in zip(all_image_data, all_tetx_data, all_video_data):
-        if ra == None:
-            print(len(a), len(b), len(c))
-            ra = draw_examples(a, 50000)
-            rb = draw_examples(b, 50000)
-            rc = draw_examples(c, 50000)
+    for a, b, c in zip(all_image_data, all_text_data, all_video_data):
+        if ra is None:
+            print(f"VQA total sample: {len(a)}; Alpaca total sample:{len(b)}; AVSD total sample: {len(c)}")
+            ra = draw_examples(a, args.vqa_sample_number)
+            rb = draw_examples(b, args.alpaca_sample_number)
+            rc = draw_examples(c, args.avsd_sample_number)
 
             a = [a[i] for i in ra]
             b = [b[i] for i in rb]
@@ -284,15 +325,17 @@ def preprocess_all_datasets():
 
     # import ipdb
     # ipdb.set_trace()
-    pickle.dump(tokenized_texts, open('data/train_total_new_instruction_1.cache', "wb"), protocol=4)
+    # pickle.dump(tokenized_texts, open('data/train_total_new_instruction.cache', "wb"), protocol=4)
+    pickle.dump(tokenized_texts, open(os.path.join(args.data_dir, saved_ds_filename), "wb"), protocol=4)
 
 
-def combine_visual_and_audio_names():
-
+def combine_visual_and_audio_names(args):
     all_names = []
 
-    image_examples = json_load('data/generated_examples_coco.json')['data']
-    video_examples = json_load('data/generated_examples_avsd.json')['data']
+    # image_examples = json_load('data/generated_examples_coco.json')['data']
+    # video_examples = json_load('data/generated_examples_avsd.json')['data']
+    image_examples = json_load(os.path.join(args.data_dir, coco_examples_filename))['data']
+    video_examples = json_load(os.path.join(args.data_dir, avsd_examples_filename))['data']
 
     for e in image_examples:
         all_names.append(e['id'])
@@ -300,12 +343,14 @@ def combine_visual_and_audio_names():
     for e in video_examples:
         all_names.append(e['id'])
     
-    all_names_dict = {k:ind for ind, k in enumerate(all_names)}
+    all_names_dict = {k: ind for ind, k in enumerate(all_names)}
     all_names = {'dict': all_names_dict, 'list': all_names}
 
-    json_dump(all_names, 'data/all_visual_names_instruction.json')
-    
+    # json_dump(all_names, 'data/all_visual_names_instruction.json')
+    json_dump(all_names, os.path.join(args.data_dir, visual_names_filename))
+
+
 if __name__ == '__main__':
-    combine_visual_and_audio_names()
-    preprocess_all_datasets()
-    pass
+    args = parse_args()
+    combine_visual_and_audio_names(args)
+    preprocess_all_datasets(args)

@@ -145,6 +145,7 @@ def draw_samples(lis, ratio):
 
     return n_lis
 
+
 def _convert_image_to_rgb(image):
     return image.convert("RGB")
 
@@ -157,6 +158,7 @@ def _transform(n_px):
         ToTensor(),
         Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
     ])
+
 
 image_dir = 'data/avsd/frames/'
 audio_dir = 'data/avsd/audios/'
@@ -177,6 +179,7 @@ frame_ind = [i * interval for i in range(6)]
 for i in range(len(frame_ind)):
     if frame_ind[i] >= t_frames:
         frame_ind[i] = t_frames - 1
+
 frame_ind[-1] = t_frames - 1
 
 train_frame_ind = frame_ind
