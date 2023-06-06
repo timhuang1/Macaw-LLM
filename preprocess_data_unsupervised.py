@@ -101,7 +101,7 @@ def preprocess_coco_to_tensor_dataset(all_visual_names, tokenizer):
             'output': e['response']
         }
         texts = PROMPT_DICT['prompt_input'].format(e['instruction'], e['input']) if e['input'] != "" else PROMPT_DICT['prompt_no_input'].format(e['instruction'])
-        full_texts = texts + '\n {} \n\n'.format(e['output'])
+        full_texts = texts + '\n {} \n\n'.format(e['output']) + tokenizer.eos_token_id
 
         all_textual_inputs.append(full_texts)
         t_all = tokenizer.encode(full_texts)
@@ -127,11 +127,6 @@ def preprocess_coco_to_tensor_dataset(all_visual_names, tokenizer):
 
     all_null_audios = [-1] * len(all_images)
     all_null_videos = all_null_audios
-    # tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
-    # tokenized_texts['labels'] = all_native_labels
-    # tokenized_texts['images'] = all_images
-    # tokenized_texts['audios'] = all_null_audios
-    # tokenized_texts['videos'] = all_null_videos
 
     return all_textual_inputs, all_native_labels, all_images, all_null_audios, all_null_videos
 
@@ -148,7 +143,7 @@ def preprocess_alpaca_to_tensor_dataset(tokenizer):
     all_native_labels = []
     for ind, e in enumerate(tqdm(all_examples)):
         texts = PROMPT_DICT['prompt_input'].format(e['instruction'], e['input']) if e['input'] != "" else PROMPT_DICT['prompt_no_input'].format(e['instruction'])
-        full_texts = texts + '\n {} \n\n'.format(e['output'])
+        full_texts = texts + '\n {} \n\n'.format(e['output']) + tokenizer.eos_token_id
         t_all = tokenizer.encode(full_texts)
 
         t_texts = tokenizer.encode(texts)
@@ -174,12 +169,6 @@ def preprocess_alpaca_to_tensor_dataset(tokenizer):
     all_null_images = [-1] * len(all_texts)
     all_null_audios = all_null_images
     all_null_videos = all_null_images 
-
-    # tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
-    # tokenized_texts['labels'] = all_native_labels
-    # tokenized_texts['images'] = all_null_images
-    # tokenized_texts['audios'] = all_null_audios
-    # tokenized_texts['videos'] = all_null_videos
 
     return all_textual_inputs, all_native_labels, all_null_images, all_null_audios, all_null_videos
 
@@ -217,7 +206,7 @@ def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
                 continue
 
             prompt = "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{}\n\n### Response:\n {} \n\n"
-            q = prompt.format(e['instruction'], e['response'])
+            q = prompt.format(e['instruction'], e['response']) + + tokenizer.eos_token_id
             t_all = tokenizer.encode(q, max_length=max_length, truncation=True)
 
             q_input = q.split(' Response:')[0] + ' Response:'
@@ -241,12 +230,6 @@ def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
             all_null_images.append(-1)
             all_texts.append(torch.tensor([t_all], dtype=torch.int))
             all_labels.append(torch.tensor([labels], dtype=torch.int))
-
-        # tokenized_texts = tokenizer(all_textual_inputs, max_length=max_length, padding='max_length', truncation=True)
-        # tokenized_texts['labels'] = all_native_labels
-        # tokenized_texts['images'] = all_null_images
-        # tokenized_texts['audios'] = all_audios
-        # tokenized_texts['videos'] = all_videos
         
         return all_textual_inputs, all_native_labels, all_null_images, all_audios, all_videos
 
@@ -302,18 +285,24 @@ def preprocess_all_datasets(args):
             print(len(new_lis))
             all_dataset.append(new_lis)
         else:
-            print(len(a), len(b), len(c))
+            # print(len(a), len(b), len(c))
             a = [a[i] for i in ra]
             b = [b[i] for i in rb]
 
             c = [c[i] for i in rc]
             new_lis = a + b + c
-            print(len(new_lis))
+            # print(len(new_lis))
             all_dataset.append(new_lis)
         i += 1
 
-    max_length = 256
-    tokenized_texts = tokenizer(all_dataset[0], max_length=max_length, padding='max_length', truncation=True)
+    max_length = args.max_length
+    tokenized_texts = tokenizer(
+        all_dataset[0],
+        max_length=max_length,
+        padding='max_length',
+        add_special_tokens=False,
+        truncation=True
+    )
     tokenized_texts['labels'] = all_dataset[1]
     
     tokenized_texts['images'] = all_dataset[2]
@@ -323,17 +312,12 @@ def preprocess_all_datasets(args):
     for k in tokenized_texts:
         print(k)
 
-    # import ipdb
-    # ipdb.set_trace()
-    # pickle.dump(tokenized_texts, open('data/train_total_new_instruction.cache', "wb"), protocol=4)
     pickle.dump(tokenized_texts, open(os.path.join(args.data_dir, saved_ds_filename), "wb"), protocol=4)
 
 
 def combine_visual_and_audio_names(args):
     all_names = []
 
-    # image_examples = json_load('data/generated_examples_coco.json')['data']
-    # video_examples = json_load('data/generated_examples_avsd.json')['data']
     image_examples = json_load(os.path.join(args.data_dir, coco_examples_filename))['data']
     video_examples = json_load(os.path.join(args.data_dir, avsd_examples_filename))['data']
 
@@ -346,7 +330,6 @@ def combine_visual_and_audio_names(args):
     all_names_dict = {k: ind for ind, k in enumerate(all_names)}
     all_names = {'dict': all_names_dict, 'list': all_names}
 
-    # json_dump(all_names, 'data/all_visual_names_instruction.json')
     json_dump(all_names, os.path.join(args.data_dir, visual_names_filename))
 
 

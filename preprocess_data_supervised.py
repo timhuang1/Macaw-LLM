@@ -533,7 +533,6 @@ def combine_visual_and_audio_names(args):
     all_names_dict = {k: ind for ind, k in enumerate(all_names)}
     all_names = {'dict': all_names_dict, 'list': all_names}
 
-    # json_dump(all_names, f'data/{all_visual_name_filename}')
     json_dump(all_names, os.path.join(args.data_dir, all_visual_name_filename))
 
     
