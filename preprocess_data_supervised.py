@@ -540,4 +540,4 @@ def combine_visual_and_audio_names(args):
 if __name__ == '__main__':
     args = parse_args()
     combine_visual_and_audio_names(args)
-    preprocess_all_datasets(args)
+    # preprocess_all_datasets(args)
