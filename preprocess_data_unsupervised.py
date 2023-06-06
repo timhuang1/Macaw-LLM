@@ -255,7 +255,7 @@ def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
     return all_textual_inputs, all_native_labels, all_images, all_audios, all_videos
 
 
-def preprocess_all_datasets():
+def preprocess_all_datasets(args):
     all_visual_names = json_load(os.path.join(args.data_dir, visual_names_filename))['dict']
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
