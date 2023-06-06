@@ -101,7 +101,7 @@ def preprocess_coco_to_tensor_dataset(all_visual_names, tokenizer):
             'output': e['response']
         }
         texts = PROMPT_DICT['prompt_input'].format(e['instruction'], e['input']) if e['input'] != "" else PROMPT_DICT['prompt_no_input'].format(e['instruction'])
-        full_texts = texts + '\n {} \n\n'.format(e['output']) + tokenizer.eos_token_id
+        full_texts = texts + '\n {} \n\n'.format(e['output']) + tokenizer.eos_token
 
         all_textual_inputs.append(full_texts)
         t_all = tokenizer.encode(full_texts)
@@ -143,7 +143,7 @@ def preprocess_alpaca_to_tensor_dataset(tokenizer):
     all_native_labels = []
     for ind, e in enumerate(tqdm(all_examples)):
         texts = PROMPT_DICT['prompt_input'].format(e['instruction'], e['input']) if e['input'] != "" else PROMPT_DICT['prompt_no_input'].format(e['instruction'])
-        full_texts = texts + '\n {} \n\n'.format(e['output']) + tokenizer.eos_token_id
+        full_texts = texts + '\n {} \n\n'.format(e['output']) + tokenizer.eos_token
         t_all = tokenizer.encode(full_texts)
 
         t_texts = tokenizer.encode(texts)
@@ -206,7 +206,7 @@ def preprocess_avsd_to_tensor_dataset(all_visual_names, tokenizer):
                 continue
 
             prompt = "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{}\n\n### Response:\n {} \n\n"
-            q = prompt.format(e['instruction'], e['response']) + + tokenizer.eos_token_id
+            q = prompt.format(e['instruction'], e['response']) + + tokenizer.eos_token
             t_all = tokenizer.encode(q, max_length=max_length, truncation=True)
 
             q_input = q.split(' Response:')[0] + ' Response:'
